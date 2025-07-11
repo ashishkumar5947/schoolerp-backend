@@ -1,0 +1,58 @@
+# 🔧 Build artifacts
+/target/
+*.class
+*.jar
+*.war
+
+# ⚙️ IDE-specific
+/.idea/
+/.vscode/
+*.iml
+
+# 🚫 OS files
+.DS_Store
+Thumbs.db
+
+# 🛑 Logs
+*.log
+logs/
+
+# 🔐 Environment & Secrets
+.env
+.env.*
+application.properties
+application.yml
+*.pem
+*.key
+*.crt
+
+# 🧪 Test coverage
+/coverage/
+
+# 📦 Maven / Gradle
+/.mvn/
+!**/src/main/**/maven-wrapper.jar
+mvnw
+mvnw.cmd
+.gradle/
+build/
+
+# 🤖 IntelliJ-specific
+out/
+
+# 🗃️ Cache files
+*.swp
+*.swo
+*.tmp
+*.bak
+
+# 🔍 Lint / reports
+checkstyle-report.xml
+findbugs.xml
+pmd.xml
+
+# ⚠️ Other tool generated files
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
