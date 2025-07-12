@@ -8,13 +8,17 @@ import com.schoolerp.mysaas.common.filterRequest.PaginationRequest;
 import com.schoolerp.mysaas.common.filterRequest.SearchRequest;
 import com.schoolerp.mysaas.student.dto.*;
 import com.schoolerp.mysaas.student.entity.Student;
-import com.schoolerp.mysaas.student.repository.StudentDataAccess;
+import com.schoolerp.mysaas.student.repository.StudentRepository;
 import com.schoolerp.mysaas.student.util.StudentMapper;
 import com.schoolerp.mysaas.student.util.StudentNativeMapper;
 import com.schoolerp.mysaas.util.CommonResponseUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -25,13 +29,13 @@ public class StudentService {
     private static final Logger logger = LoggerFactory.getLogger(StudentService.class);
     private final CommonResponseUtil commonResponseUtil;
     private final StudentMapper studentMapper;
-    private final StudentDataAccess studentDataAccess;
+    private final StudentRepository studentRepository;
 
     @Autowired
-    public StudentService(CommonResponseUtil commonResponseUtil, StudentMapper studentMapper, StudentDataAccess studentDataAccess) {
+    public StudentService(CommonResponseUtil commonResponseUtil, StudentMapper studentMapper, StudentRepository studentRepository) {
         this.commonResponseUtil = commonResponseUtil;
         this.studentMapper = studentMapper;
-        this.studentDataAccess = studentDataAccess;
+        this.studentRepository = studentRepository;
     }
 
     public CommonResponse<StudentCreateResponse> createStudent(String tenantCode, String channelCode, String locale, StudentCreateRequest studentCreateRequest) {
@@ -50,7 +54,7 @@ public class StudentService {
             String admissionNo = "TEST" + number;
             student.setAdmissionNo(admissionNo);
             student.setSchoolId(10L + (long)(random.nextDouble() * 9000L));
-            studentDataAccess.saveStudent(tenantCode, channelCode, student);
+            studentRepository.save(student);
 
             // 📤 5. Map Entity to Response DTO
             StudentCreateResponse studentResponse = studentMapper.toResponse(student);
@@ -65,84 +69,67 @@ public class StudentService {
         return commonResponse;
     }
 
-    public CommonResponse<List<StudentListResponse>> listStudents(String tenantCode, String channelCode, String locale, StudentListRequest request) {
+    public CommonResponse<List<StudentListResponse>> listStudents(
+            String tenantCode,
+            String channelCode,
+            String locale,
+            StudentListRequest request
+    ) {
         String method = "[listStudents]";
         logger.info("📥 {} Request received: {}", method, request);
 
-        CommonResponse<List<StudentListResponse>> response = new CommonResponse<>();
-        List<StudentListResponse> students = new ArrayList<>();
-        PaginationMeta paginationMeta;
+        CommonResponse<List<StudentListResponse>> response;
 
         try {
-            // --- Base Queries ---
-            StringBuilder sql = new StringBuilder("SELECT id, admission_no, first_name, last_name, class_name, section, roll_number FROM students WHERE 1=1 ");
-            StringBuilder countSql = new StringBuilder("SELECT COUNT(*) FROM students WHERE 1=1 ");
-            List<Object> params = new ArrayList<>();
+            // 🔍 Extract Filters
+            StudentFilterRequest filter = Optional.ofNullable(request.getFilters()).orElse(new StudentFilterRequest());
+            String className = filter.getClassName();
+            String section = filter.getSection();
+            Integer rollNumber = filter.getRollNumber();
+            String search = Optional.ofNullable(request.getSearch()).map(SearchRequest::getSearchKeyword).orElse(null);
 
-            // --- Filters ---
-            if (request.getFilters() != null) {
-                StudentFilterRequest filter = request.getFilters();
-                if (filter.getClassName() != null) {
-                    sql.append("AND class_name = ? ");
-                    countSql.append("AND class_name = ? ");
-                    params.add(filter.getClassName());
-                }
-                if (filter.getSection() != null) {
-                    sql.append("AND section = ? ");
-                    countSql.append("AND section = ? ");
-                    params.add(filter.getSection());
-                }
-                if (filter.getRollNumber() != null) {
-                    sql.append("AND roll_number = ? ");
-                    countSql.append("AND roll_number = ? ");
-                    params.add(filter.getRollNumber());
-                }
-            }
-
-            // --- Search ---
-            if (request.getSearch() != null && request.getSearch().getSearchKeyword() != null) {
-                sql.append("AND first_name ILIKE ? ");
-                countSql.append("AND first_name ILIKE ? ");
-                params.add("%" + request.getSearch().getSearchKeyword() + "%");
-            }
-
-            // --- Sorting ---
-            String sortBy = Optional.ofNullable(request.getSearch()).map(SearchRequest::getSortBy).orElse("first_name");
-            String sortDir = Optional.ofNullable(request.getSearch()).map(SearchRequest::getSortDirection).orElse("ASC");
-            sql.append("ORDER BY ").append(sortBy).append(" ").append(sortDir).append(" ");
-
-            // --- Pagination ---
+            // ⏱ Pagination & Sorting
             int page = Optional.ofNullable(request.getPagination()).map(PaginationRequest::getPage).orElse(0);
             int size = Optional.ofNullable(request.getPagination()).map(PaginationRequest::getSize).orElse(10);
-            List<Object[]> rows = studentDataAccess.fetchRowsWithPagination(sql.toString(), page, size, params.toArray());
-            students = rows.stream().map(StudentNativeMapper::map).toList();
 
-            // --- Count Query ---
-            Long total = studentDataAccess.fetchCount(countSql.toString(), params.toArray());
+            String sortBy = Optional.ofNullable(request.getSearch()).map(SearchRequest::getSortBy).orElse("firstName");
+            String sortDir = Optional.ofNullable(request.getSearch()).map(SearchRequest::getSortDirection).orElse("asc");
 
-            paginationMeta = PaginationMeta.builder()
+            Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC;
+            Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+
+            // 🚀 Fetch Data from JPA
+            Page<Student> studentPage = studentRepository.findFilteredStudents(className, section, rollNumber, search, pageable);
+
+            // 🔄 Map to DTO
+            List<StudentListResponse> students = studentPage.getContent()
+                    .stream()
+                    .map(studentMapper::toListResponse)
+                    .toList();
+
+            // 📦 Response
+            PaginationMeta pagination = PaginationMeta.builder()
                     .page(page)
                     .size(size)
-                    .totalElements(total)
-                    .totalPages((int) Math.ceil((double) total / size))
-                    .lastPage((long) (page + 1) * size >= total)
+                    .totalElements(studentPage.getTotalElements())
+                    .totalPages(studentPage.getTotalPages())
+                    .lastPage(studentPage.isLast())
                     .build();
 
-            // --- Success Response ---
             response = CommonResponse.<List<StudentListResponse>>builder()
                     .validationSuccess(true)
                     .processingSuccess(true)
                     .statusCode(200)
                     .message("Success")
                     .data(students)
-                    .pagination(paginationMeta)
+                    .pagination(pagination)
                     .timestamp(LocalDateTime.now())
                     .build();
 
-            logger.info("✅ {} Students fetched successfully | count={}, page={}/{}", method, students.size(), page, paginationMeta.getTotalPages());
+            logger.info("✅ {} Students fetched: {} | page {}/{}", method, students.size(), page, pagination.getTotalPages());
 
         } catch (Exception ex) {
-            logger.error("❌ {} Error fetching student list: {}", method, ex.getMessage(), ex);
+            logger.error("❌ {} Error: {}", method, ex.getMessage(), ex);
 
             response = CommonResponse.<List<StudentListResponse>>builder()
                     .validationSuccess(true)
@@ -158,6 +145,7 @@ public class StudentService {
 
         return response;
     }
+
 
 
 

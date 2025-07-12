@@ -1,45 +1,57 @@
 package com.schoolerp.mysaas.common.tenant.interceptors;
 
+import com.schoolerp.mysaas.common.tenant.CachedTenantInfo;
+import com.schoolerp.mysaas.common.tenant.PlatformTenantService;
 import com.schoolerp.mysaas.common.tenant.TenantContextHolder;
-import com.schoolerp.mysaas.common.tenant.TenantValidator;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.io.IOException;
+import java.time.LocalDate;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class TenantInterceptor implements HandlerInterceptor {
 
-    private final TenantValidator tenantValidator;
+    private final PlatformTenantService platformTenantService;
 
     @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws IOException {
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String tenantCode = request.getHeader("X-Tenant-Code");
 
-        // Step 1: Validate presence
-        if (tenantCode == null || tenantCode.isBlank()) {
-            response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
-            response.getWriter().write("Missing X-Tenant-Code header");
+        // 1. Validate presence of header
+        if (tenantCode == null || tenantCode.trim().isEmpty()) {
+            log.warn("🚫 Missing X-Tenant-Code header");
+            response.sendError(HttpStatus.BAD_REQUEST.value(), "Missing tenant header");
             return false;
         }
 
-        // Step 2: Validate tenant exists
-        try {
-            tenantValidator.validateTenant(tenantCode);
-        } catch (IllegalArgumentException e) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            response.getWriter().write(e.getMessage());
+        // 2. Check cache for schema + license info
+        CachedTenantInfo info = platformTenantService.getTenantInfo(tenantCode);
+        if (info == null) {
+            log.warn("❌ Tenant not found in cache: {}", tenantCode);
+            response.sendError(HttpStatus.NOT_FOUND.value(), "Tenant not found");
             return false;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
         }
 
-        // Step 3: Set in context
-        TenantContextHolder.setTenantCode(tenantCode);
+        // 3. Check active & expiry
+        if (!info.getIsActive()) {
+            log.warn("🔒 Inactive tenant: {}", tenantCode);
+            response.sendError(HttpStatus.FORBIDDEN.value(), "Tenant is inactive");
+            return false;
+        }
+
+        if (info.getExpiryDate() != null && info.getExpiryDate().isBefore(LocalDate.now())) {
+            log.warn("📅 License expired for tenant: {}", tenantCode);
+            response.sendError(HttpStatus.FORBIDDEN.value(), "Tenant license expired");
+            return false;
+        }
+        
         return true;
     }
 

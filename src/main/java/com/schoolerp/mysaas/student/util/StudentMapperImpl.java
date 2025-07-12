@@ -225,4 +225,18 @@ public class StudentMapperImpl implements StudentMapper {
                 .build();
     }
 
+
+    @Override
+    public StudentListResponse toListResponse(Student student) {
+        return StudentListResponse.builder()
+                .id(student.getId())
+                .admissionNo(student.getAdmissionNo())
+                .firstName(student.getFirstName())
+                .lastName(student.getLastName())
+                .className(student.getClassName())
+                .section(student.getSection())
+                .rollNumber(student.getRollNumber())
+                .build();
+    }
+
 }
