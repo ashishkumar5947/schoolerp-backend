@@ -9,13 +9,22 @@ import org.springframework.data.repository.query.Param;
 
 public interface StudentRepository extends JpaRepository<Student, String> {
 
-    @Query("""
-        SELECT s FROM Student s
-        WHERE (:className IS NULL OR s.className = :className)
-          AND (:section IS NULL OR s.section = :section)
-          AND (:rollNumber IS NULL OR s.rollNumber = :rollNumber)
-          AND (:search IS NULL OR LOWER(s.firstName) LIKE LOWER(CONCAT('%', :search, '%')))
-    """)
+    @Query(value = """
+    SELECT * FROM students
+    WHERE (:className IS NULL OR class_name = :className)
+      AND (:section IS NULL OR section = :section)
+      AND (:rollNumber IS NULL OR roll_number = :rollNumber)
+      AND (:search IS NULL OR LOWER(first_name) LIKE LOWER(CONCAT('%', :search, '%')))
+    """,
+            countQuery = """
+    SELECT COUNT(*) FROM students
+    WHERE (:className IS NULL OR class_name = :className)
+      AND (:section IS NULL OR section = :section)
+      AND (:rollNumber IS NULL OR roll_number = :rollNumber)
+      AND (:search IS NULL OR LOWER(first_name) LIKE LOWER(CONCAT('%', :search, '%')))
+    """,
+            nativeQuery = true
+    )
     Page<Student> findFilteredStudents(
             @Param("className") String className,
             @Param("section") String section,
@@ -23,4 +32,5 @@ public interface StudentRepository extends JpaRepository<Student, String> {
             @Param("search") String search,
             Pageable pageable
     );
+
 }
